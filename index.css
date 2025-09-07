@@ -50,7 +50,7 @@ header h1 {
     gap: 1rem;
 }
 
-.header-btn, .download-btn {
+.header-btn, .download-btn, .import-btn {
   background-color: #3498db;
   color: white;
   border: none;
@@ -73,6 +73,18 @@ header h1 {
 .download-btn:hover {
   background-color: #2ecc71;
 }
+
+.import-btn {
+  background-color: #9b59b6;
+}
+.import-btn:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}
+.import-btn:hover:not(:disabled) {
+  background-color: #8e44ad;
+}
+
 
 .main-container {
   display: flex;
@@ -251,6 +263,11 @@ html[dir="rtl"] .add-btn {
 #cv-preview.rtl-preview {
     direction: rtl;
     font-family: 'Tajawal', sans-serif;
+}
+
+#cv-preview a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .preview-header {
@@ -538,6 +555,42 @@ html[dir="rtl"] .suggestions-list {
 html[dir="rtl"] .suggestions-list li {
     padding-left: 0;
     padding-right: 0.75rem;
+}
+
+
+/* Import Status Modal */
+.import-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  color: white;
+  text-align: center;
+}
+
+.import-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.import-modal-content .loading-spinner {
+  border-color: #f3f3f3;
+  border-top-color: #3498db;
+  width: 60px;
+  height: 60px;
+}
+
+.import-modal-content p {
+  font-size: 1.2rem;
+  font-weight: 500;
 }
 
 

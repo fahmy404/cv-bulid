@@ -12,6 +12,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 // Fix: Declare html2pdf to resolve 'Cannot find name' error.
 declare var html2pdf: any;
+declare var pdfjsLib: any;
 
 // Polyfill for structuredClone
 if (!window.structuredClone) {
@@ -25,6 +26,13 @@ const translations = {
     guide: 'Guide',
     cvStrengthTest: 'CV Strength Test',
     switchLang: 'العربية',
+    importFromPdf: 'Import from PDF',
+    importing: 'Importing...',
+    importConfirm: 'This will replace all current data in the form. Are you sure you want to continue?',
+    importSuccess: 'CV data imported successfully!',
+    importError: 'Failed to import CV. Please try another file or enter the data manually.',
+    parsingPdf: 'Parsing your PDF...',
+    analyzingCvContent: 'Analyzing CV content with AI...',
     layoutOptions: 'Layout Options',
     pageLayout: 'Page Layout',
     onePage: 'One Page',
@@ -37,6 +45,10 @@ const translations = {
     phone: 'Phone',
     linkedin: 'LinkedIn Profile',
     address: 'Address',
+    links: 'Links',
+    displayText: 'Display Text',
+    url: 'URL',
+    addLink: 'Add Link',
     professionalSummary: 'Professional Summary',
     summary: 'Summary',
     workExperience: 'Work Experience',
@@ -107,6 +119,13 @@ const translations = {
     guide: 'دليل',
     cvStrengthTest: 'اختبار قوة السيرة الذاتية',
     switchLang: 'English',
+    importFromPdf: 'استيراد من PDF',
+    importing: 'جاري الاستيراد...',
+    importConfirm: 'سيؤدي هذا إلى استبدال جميع البيانات الحالية في النموذج. هل أنت متأكد من أنك تريد المتابعة؟',
+    importSuccess: 'تم استيراد بيانات السيرة الذاتية بنجاح!',
+    importError: 'فشل استيراد السيرة الذاتية. يرجى تجربة ملف آخر أو إدخال البيانات يدويًا.',
+    parsingPdf: 'جاري تحليل ملف PDF الخاص بك...',
+    analyzingCvContent: 'جاري تحليل محتوى السيرة الذاتية بالذكاء الاصطناعي...',
     layoutOptions: 'خيارات التنسيق',
     pageLayout: 'تنسيق الصفحة',
     onePage: 'صفحة واحدة',
@@ -119,6 +138,10 @@ const translations = {
     phone: 'الهاتف',
     linkedin: 'رابط لينكدإن',
     address: 'العنوان',
+    links: 'روابط',
+    displayText: 'نص العرض',
+    url: 'الرابط',
+    addLink: 'إضافة رابط',
     professionalSummary: 'الملخص الاحترافي',
     summary: 'الملخص',
     workExperience: 'الخبرة العملية',
@@ -190,7 +213,9 @@ const initialCvData = {
   jobTitle: 'Digital Marketing | SEO | SEM | Content Marketing',
   email: 'michael.harris@email.com',
   phone: '+61 412 345 678',
-  linkedin: 'linkedin.com/in/michaelharris',
+  links: [
+    { id: 1, text: 'LinkedIn', url: 'https://linkedin.com/in/michaelharris' }
+  ],
   address: 'Sydney, Australia',
   summary: 'Results-oriented marketing professional with over 5 years of experience in digital marketing, brand strategy, and content creation. Proven ability to drive brand growth, increase online engagement, and deliver data-driven results. Expert in utilizing digital tools and analytics to optimize marketing campaigns and achieve business objectives.',
   experience: [
@@ -218,13 +243,28 @@ const loadCvDataFromStorage = () => {
   try {
     const savedData = localStorage.getItem(CV_DATA_STORAGE_KEY);
     if (savedData) {
-      return JSON.parse(savedData);
+      const parsedData = JSON.parse(savedData);
+      // Migration for old data structure with linkedin property
+      if (parsedData.linkedin && !Array.isArray(parsedData.links)) {
+        let url = parsedData.linkedin;
+        if (url && !url.startsWith('http')) {
+            url = `https://${url}`;
+        }
+        parsedData.links = [{ id: 1, text: 'LinkedIn', url: url }];
+        delete parsedData.linkedin;
+      }
+      // Ensure links is always an array
+      if (!Array.isArray(parsedData.links)) {
+          parsedData.links = [];
+      }
+      return parsedData;
     }
   } catch (error) {
     console.error("Failed to load or parse CV data from localStorage", error);
   }
-  return initialCvData;
+  return structuredClone(initialCvData);
 };
+
 
 const loadSettingsFromStorage = () => {
   try {
@@ -246,6 +286,8 @@ const App = () => {
   const [language, setLanguage] = React.useState('en');
   const [isGuideVisible, setGuideVisible] = React.useState(false);
   const [isTesterVisible, setTesterVisible] = React.useState(false);
+  const [importStatus, setImportStatus] = React.useState('');
+  const fileInputRef = React.useRef(null);
   const t = translations[language];
 
   React.useEffect(() => {
@@ -305,6 +347,9 @@ const App = () => {
         case 'certifications':
           newItem = { id: newId, text: '' };
           break;
+        case 'links':
+          newItem = { id: newId, text: '', url: '' };
+          break;
         default: return prev;
       }
       return { ...prev, [section]: [...prev[section], newItem] };
@@ -330,13 +375,108 @@ const App = () => {
     html2pdf().from(element).set(opt).save();
   };
 
+  const handlePdfImport = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!window.confirm(t.importConfirm)) {
+        event.target.value = null;
+        return;
+    }
+
+    setImportStatus(t.parsingPdf);
+    try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.js`;
+
+        const reader = new FileReader();
+        reader.readAsArrayBuffer(file);
+
+        reader.onload = async (e) => {
+            try {
+                const pdf = await pdfjsLib.getDocument(e.target.result).promise;
+                let fullText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+                }
+
+                setImportStatus(t.analyzingCvContent);
+
+                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                const prompt = `You are an expert CV and resume parser. Analyze the following text extracted from a CV PDF and convert it into a structured JSON object. The JSON object must conform to the provided schema. Extract all relevant information accurately. If a section is not present, return an empty string or empty array for it. CV Text:\n\n${fullText}`;
+
+                const cvDataSchema = {
+                    type: Type.OBJECT,
+                    properties: {
+                        name: { type: Type.STRING }, jobTitle: { type: Type.STRING }, email: { type: Type.STRING },
+                        phone: { type: Type.STRING }, address: { type: Type.STRING }, summary: { type: Type.STRING },
+                        links: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, url: { type: Type.STRING } } } },
+                        experience: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, company: { type: Type.STRING }, location: { type: Type.STRING }, from: { type: Type.STRING }, to: { type: Type.STRING }, description: { type: Type.STRING } } } },
+                        education: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { degree: { type: Type.STRING }, university: { type: Type.STRING }, location: { type: Type.STRING }, year: { type: Type.STRING } } } },
+                        skills: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING } } } },
+                        certifications: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING } } } }
+                    }
+                };
+
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash', contents: prompt,
+                    config: { responseMimeType: "application/json", responseSchema: cvDataSchema }
+                });
+
+                let jsonText = response.text.trim();
+                if (jsonText.startsWith("```json")) {
+                    jsonText = jsonText.substring(7, jsonText.length - 3).trim();
+                }
+
+                const parsedData = JSON.parse(jsonText);
+                const processedData = {
+                    ...structuredClone(initialCvData), ...parsedData,
+                    experience: (parsedData.experience || []).map((item, index) => ({ ...item, id: index + 1 })),
+                    education: (parsedData.education || []).map((item, index) => ({ ...item, id: index + 1 })),
+                    skills: (parsedData.skills || []).map((item, index) => ({ ...item, id: index + 1 })),
+                    certifications: (parsedData.certifications || []).map((item, index) => ({ ...item, id: index + 1 })),
+                    links: (parsedData.links || []).map((item, index) => ({ ...item, id: index + 1 })),
+                };
+                setCvData(processedData);
+                setImportStatus(t.importSuccess);
+                setTimeout(() => setImportStatus(''), 3000);
+            } catch (err) {
+                console.error("Error during PDF processing or AI analysis:", err);
+                setImportStatus(t.importError);
+                setTimeout(() => setImportStatus(''), 5000);
+            } finally {
+                 event.target.value = null;
+            }
+        };
+        reader.onerror = () => { throw new Error("FileReader error"); };
+    } catch (err) {
+        console.error("Error setting up PDF import:", err);
+        setImportStatus(t.importError);
+        setTimeout(() => setImportStatus(''), 5000);
+        event.target.value = null;
+    }
+  };
+
   return (
     <React.Fragment>
       <GuideModal isVisible={isGuideVisible} onClose={() => setGuideVisible(false)} t={t} />
       <CVStrengthTesterModal isVisible={isTesterVisible} onClose={() => setTesterVisible(false)} t={t} cvData={cvData} />
+      <ImportStatusModal status={importStatus} />
       <header>
         <h1>{t.headerTitle}</h1>
         <div className="header-controls">
+            <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handlePdfImport}
+                accept="application/pdf"
+                style={{ display: 'none' }}
+                aria-hidden="true"
+            />
+            <button className="import-btn" onClick={() => fileInputRef.current.click()} disabled={!!importStatus}>
+                {importStatus ? t.importing : t.importFromPdf}
+            </button>
             <button className="header-btn" onClick={() => setGuideVisible(true)}>{t.guide}</button>
             <button className="header-btn" onClick={() => setTesterVisible(true)}>{t.cvStrengthTest}</button>
             <button className="header-btn" onClick={toggleLanguage}>{t.switchLang}</button>
@@ -393,8 +533,22 @@ const App = () => {
             <InputField label={t.jobTitle} name="jobTitle" value={cvData.jobTitle} onChange={handleChange} />
             <InputField label={t.email} name="email" value={cvData.email} onChange={handleChange} type="email" />
             <InputField label={t.phone} name="phone" value={cvData.phone} onChange={handleChange} />
-            <InputField label={t.linkedin} name="linkedin" value={cvData.linkedin} onChange={handleChange} />
             <InputField label={t.address} name="address" value={cvData.address} onChange={handleChange} />
+          </FormSection>
+
+          <FormSection title={t.links}>
+            {(cvData.links || []).map(link => (
+              <div key={link.id} className="dynamic-item">
+                <InputField label={t.displayText} name="text" value={link.text} onChange={(e) => handleDynamicChange('links', link.id, e)} />
+                <InputField label={t.url} name="url" value={link.url} onChange={(e) => handleDynamicChange('links', link.id, e)} type="url" />
+                <div className="dynamic-controls">
+                    <button className="remove-btn" onClick={() => removeDynamicItem('links', link.id)}>{t.remove}</button>
+                </div>
+              </div>
+            ))}
+             <div className="dynamic-controls">
+                <button className="add-btn" onClick={() => addDynamicItem('links')}>{t.addLink}</button>
+            </div>
           </FormSection>
           
           <FormSection title={t.professionalSummary}>
@@ -476,7 +630,15 @@ const App = () => {
               <h1>{cvData.name || t.fullName}</h1>
               <p className="title">{cvData.jobTitle || t.jobTitle}</p>
               <p className="preview-contact">
-                {cvData.address || t.address} | {cvData.email || t.email} | {cvData.phone || t.phone} | {cvData.linkedin || 'LinkedIn'}
+                {cvData.address || t.address} | {cvData.email || t.email} | {cvData.phone || t.phone}
+                {(cvData.links || []).filter(l => l.url).map(link => (
+                    <React.Fragment key={link.id}>
+                        {' | '}
+                        <a href={!link.url.startsWith('http') ? `https://${link.url}` : link.url} target="_blank" rel="noopener noreferrer">
+                            {link.text || link.url}
+                        </a>
+                    </React.Fragment>
+                ))}
               </p>
             </div>
 
@@ -499,7 +661,7 @@ const App = () => {
                     <div className="item-subheader">{exp.company || t.preview_company}, {exp.location || t.preview_location}</div>
                     <div className="item-description">
                       <ul>
-                        {exp.description.split('\n').filter(line => line.trim() !== '').map((line, i) => <li key={i}>{line.replace('•', '').trim()}</li>)}
+                        {(exp.description || '').split('\n').filter(line => line.trim() !== '').map((line, i) => <li key={i}>{line.replace('•', '').trim()}</li>)}
                       </ul>
                     </div>
                   </div>
@@ -626,6 +788,7 @@ const CVStrengthTesterModal = ({ isVisible, onClose, t, cvData }) => {
         Education: ${cvData.education.map(edu => `\n- ${edu.degree} from ${edu.university}`).join('')}
         Skills: ${cvData.skills.map(skill => skill.text).join(', ')}
         Certifications: ${cvData.certifications.map(cert => cert.text).join(', ')}
+        Links: ${(cvData.links || []).map(link => `\n- ${link.text} (${link.url})`).join('')}
       `;
 
       const prompt = `You are an expert ATS and career coach. Analyze the following CV against the job title "${jobTitle}". Provide a score from 0 to 100 and actionable suggestions for improvement. CV Text: ${cvText}`;
@@ -727,6 +890,21 @@ const CVStrengthTesterModal = ({ isVisible, onClose, t, cvData }) => {
       </div>
     </div>
   );
+};
+
+const ImportStatusModal = ({ status }) => {
+    if (!status) return null;
+
+    const isProcessing = status.includes('...') || status.includes('جاري');
+
+    return (
+        <div className="import-modal-overlay">
+            <div className="import-modal-content">
+                {isProcessing && <div className="loading-spinner"></div>}
+                <p>{status}</p>
+            </div>
+        </div>
+    );
 };
 
 
